@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HARITA 稟議・決裁ナビゲーター</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts: Noto Sans JP -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Chosen Palette: Warm Neutrals & Calm Harmony -->
+    <!-- Background: #F9FAFB (Warm Gray 50) -->
+    <!-- Primary Text: #1F2937 (Gray 800) -->
+    <!-- Accent (Action): #4B5563 (Gray 600) / #10B981 (Emerald 500 for success) -->
+    <!-- Secondary: #E5E7EB (Gray 200) -->
+    
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #F9FAFB;
+            color: #1F2937;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        .nav-item.active {
+            background-color: #E5E7EB;
+            color: #111827;
+            border-left: 4px solid #4B5563;
+        }
+        .card {
+            background-color: #FFFFFF;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        /* Custom scrollbar for checklist area if needed */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+    </style>
+
+    <!-- Application Structure Plan: 
+         - Layout: Sidebar navigation (collapsible on mobile) + Main Content Area.
+         - Sections:
+           1. Dashboard (Home): Immediate status check. Shows "Days until Deadline" gauge and current phase.
+           2. Route Checker (Interactive Tool): Input amount/type -> Get logic result. Replaces complex tables.
+           3. Monthly Schedule (Visual): Gantt chart of the standard flow.
+           4. Rulebook (Reference): Accordion/Tabs for static detailed rules (Budget, Systems).
+           5. Checklist (Action): Interactive checkboxes for pre-submission verification.
+         - Rationale: Users come with a specific intent ("Can I buy this?", "When is the deadline?"). The structure prioritizes these tasks over reading the manual linearly.
+    -->
+
+    <!-- Visualization & Content Choices:
+         - Deadline Gauge (Chart.js Doughnut): VISUALIZES time urgency. Goal: Inform/Motivate. Interaction: None (updates on load). Justification: A simple date is easy to miss; a filling ring creates awareness.
+         - Monthly Flow (Chart.js Bar/Gantt): VISUALIZES the process over time. Goal: Organize/Plan. Interaction: Tooltips with details. Justification: Shows overlaps (Preparation vs Application) better than text list.
+         - Route Checker (DOM Manipulation): LOGIC processing. Goal: Inform/Clarify. Interaction: Form input. Justification: The matrix is complex; a calculator removes error.
+         - NO SVG/Mermaid confirmed. Using HTML/CSS shapes and Unicode.
+    -->
+    
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <!-- Mobile Header -->
+    <div class="md:hidden fixed w-full bg-white z-50 border-b border-gray-200 flex justify-between items-center p-4">
+        <h1 class="text-lg font-bold text-gray-800">HARITA 決裁ナビ</h1>
+        <button id="mobile-menu-btn" class="text-gray-600 focus:outline-none">
+            <span class="text-2xl">☰</span>
+        </button>
+    </div>
+
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar" class="transform -translate-x-full md:translate-x-0 transition-transform duration-300 fixed md:relative z-40 w-64 h-full bg-white border-r border-gray-200 flex flex-col pt-16 md:pt-0">
+        <div class="p-6 border-b border-gray-100 hidden md:block">
+            <h1 class="text-xl font-bold text-gray-800 tracking-tight">HARITA<br><span class="text-sm font-normal text-gray-500">稟議・決裁運用ナビ</span></h1>
+            <p class="text-xs text-gray-400 mt-2">DX担当版 Ver.2026</p>
+        </div>
+        
+        <nav class="flex-1 overflow-y-auto py-4">
+            <ul class="space-y-1">
+                <li>
+                    <button onclick="showSection('dashboard')" class="nav-item w-full text-left px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors active" id="nav-dashboard">
+                        📊 ダッシュボード
+                    </button>
+                </li>
+                <li>
+                    <button onclick="showSection('route-checker')" class="nav-item w-full text-left px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors" id="nav-route-checker">
+                        ⚖️ 承認ルート判定
+                    </button>
+                </li>
+                <li>
+                    <button onclick="showSection('schedule')" class="nav-item w-full text-left px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors" id="nav-schedule">
+                        📅 月次スケジュール
+                    </button>
+                </li>
+                <li>
+                    <button onclick="showSection('rules')" class="nav-item w-full text-left px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors" id="nav-rules">
+                        📚 重要ルール・予算
+                    </button>
+                </li>
+                <li>
+                    <button onclick="showSection('checklist')" class="nav-item w-full text-left px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors" id="nav-checklist">
+                        ✅ 申請前チェック
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="p-4 border-t border-gray-100 bg-gray-50">
+            <div class="text-xs text-gray-500 text-center">
+                <p>次の決裁会議まで</p>
+                <p id="sidebar-countdown" class="text-lg font-bold text-emerald-600 mt-1">--日</p>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 h-full overflow-y-auto bg-gray-50 p-4 md:p-8 pt-20 md:pt-8 w-full" id="main-content">
+        
+        <!-- SECTION: DASHBOARD -->
+        <section id="dashboard" class="space-y-6 max-w-5xl mx-auto">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">ダッシュボード</h2>
+                <p class="text-gray-600 mt-2">
+                    現在のステータスと次のアクションを確認します。このダッシュボードは「毎月第4月曜日」の経営ミーティングをゴールとして設計されています。
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Deadline Widget -->
+                <div class="card p-6 flex flex-col items-center justify-center">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4 w-full text-left border-l-4 border-emerald-500 pl-3">決裁カウントダウン</h3>
+                    <div class="chart-container h-64 w-full flex justify-center items-center">
+                        <canvas id="deadlineChart"></canvas>
+                    </div>
+                    <div class="mt-4 text-center">
+                        <p class="text-sm text-gray-500">次回の経営ミーティング（決裁日）</p>
+                        <p id="next-meeting-date" class="text-xl font-bold text-gray-800">YYYY/MM/DD</p>
+                    </div>
+                </div>
+
+                <!-- Action Required Widget -->
+                <div class="card p-6">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4 border-l-4 border-blue-500 pl-3">現在のアクション指針</h3>
+                    <div id="current-action-display" class="bg-blue-50 rounded-lg p-6 text-center h-64 flex flex-col justify-center items-center">
+                        <span class="text-4xl mb-3" id="action-icon">🤔</span>
+                        <h4 class="text-xl font-bold text-blue-800 mb-2" id="action-title">ステータス確認中...</h4>
+                        <p class="text-blue-600 text-sm" id="action-desc">読み込み中</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Stats / Shortcuts -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                <button onclick="showSection('route-checker')" class="card p-4 hover:bg-gray-50 text-left transition group">
+                    <span class="block text-2xl mb-2 group-hover:scale-110 transition-transform origin-left">⚖️</span>
+                    <span class="block font-bold text-gray-700">いくらまで課長承認？</span>
+                    <span class="text-xs text-gray-500">金額による権限を確認</span>
+                </button>
+                <button onclick="showSection('rules')" class="card p-4 hover:bg-gray-50 text-left transition group">
+                    <span class="block text-2xl mb-2 group-hover:scale-110 transition-transform origin-left">📁</span>
+                    <span class="block font-bold text-gray-700">システム費用の按分</span>
+                    <span class="text-xs text-gray-500">全社費用のルールを確認</span>
+                </button>
+                <button onclick="showSection('checklist')" class="card p-4 hover:bg-gray-50 text-left transition group">
+                    <span class="block text-2xl mb-2 group-hover:scale-110 transition-transform origin-left">✅</span>
+                    <span class="block font-bold text-gray-700">申請漏れを防ぐ</span>
+                    <span class="text-xs text-gray-500">最終チェックリスト</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- SECTION: ROUTE CHECKER -->
+        <section id="route-checker" class="hidden space-y-6 max-w-4xl mx-auto">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">承認ルート判定ツール</h2>
+                <p class="text-gray-600 mt-2">
+                    金額と申請タイプを入力すると、必要な承認ルート、申請書の種類、添付書類の条件を自動判定します。
+                    <br><span class="text-xs text-gray-400">※イノベーション戦略本部の特例（CL兼務）に対応済み。</span>
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Inputs -->
+                <div class="card p-6 space-y-6 h-fit">
+                    <h3 class="font-bold text-gray-700 border-b pb-2">条件入力</h3>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">予定金額（税抜）</label>
+                        <div class="relative">
+                            <span class="absolute left-3 top-2 text-gray-500">¥</span>
+                            <input type="number" id="input-amount" class="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例: 150000" oninput="calculateRoute()">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">案件カテゴリ</label>
+                        <select id="input-category" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="calculateRoute()">
+                            <option value="general">一般（物品購入・契約等）</option>
+                            <option value="vehicle">車両・重機修繕</option>
+                            <option value="consumable">消耗品一覧からの購入</option>
+                        </select>
+                    </div>
+
+                    <div class="bg-yellow-50 p-4 rounded-md text-sm text-yellow-800">
+                        <strong>💡 ヒント:</strong> 50万円以上の場合は相見積もりが必須になります。
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div class="card p-6 bg-gray-800 text-white relative overflow-hidden">
+                    <div class="absolute top-0 right-0 p-4 opacity-10 text-6xl font-serif">⚖️</div>
+                    <h3 class="font-bold text-gray-200 border-b border-gray-600 pb-2 mb-4">判定結果</h3>
+
+                    <div id="result-placeholder" class="text-center py-10 text-gray-400">
+                        左側のフォームに金額を入力してください
+                    </div>
+
+                    <div id="result-content" class="hidden space-y-4">
+                        <div>
+                            <p class="text-xs text-gray-400">申請書の種類</p>
+                            <p class="text-xl font-bold text-emerald-400" id="res-doc-type">---</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-400">最終承認者</p>
+                            <p class="text-2xl font-bold text-white" id="res-approver">---</p>
+                        </div>
+                        <div class="bg-gray-700 rounded p-3 mt-4">
+                            <p class="text-xs text-gray-400 mb-1">必須条件・添付書類</p>
+                            <ul class="text-sm list-disc pl-4 space-y-1 text-gray-200" id="res-requirements">
+                                <!-- Dynamic list -->
+                            </ul>
+                        </div>
+                        <div id="res-alert" class="hidden bg-red-900/50 border border-red-500 text-red-100 p-3 rounded text-sm">
+                            <!-- Alert content -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: SCHEDULE -->
+        <section id="schedule" class="hidden space-y-6 max-w-5xl mx-auto">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">月次標準フロー</h2>
+                <p class="text-gray-600 mt-2">
+                    毎月第4月曜日の決裁に向けた標準的なタイムラインです。申請遅れは決裁の翌月持ち越し（＝業務遅延）に直結するため、必ず中旬までにアクションを開始してください。
+                </p>
+            </div>
+
+            <div class="card p-6">
+                <h3 class="text-lg font-semibold text-gray-700 mb-4 border-l-4 border-indigo-500 pl-3">月間タイムライン（1日～31日）</h3>
+                <p class="text-sm text-gray-500 mb-4">横軸は日付を示しています。現在の位置を把握し、遅れていないか確認しましょう。</p>
+                <div class="chart-container w-full h-80">
+                    <canvas id="scheduleChart"></canvas>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                <div class="bg-white p-4 rounded-lg border-l-4 border-gray-400 shadow-sm">
+                    <h4 class="font-bold text-gray-700">1. 準備フェーズ</h4>
+                    <p class="text-xs text-gray-500 mt-1">～毎月中旬まで</p>
+                    <p class="text-sm mt-2 text-gray-600">稟議管理一覧へのエントリー。予算内であるかの確認。業者選定と見積もり取得。</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg border-l-4 border-blue-500 shadow-sm">
+                    <h4 class="font-bold text-gray-700">2. 申請フェーズ</h4>
+                    <p class="text-xs text-gray-500 mt-1">毎月10日～15日推奨</p>
+                    <p class="text-sm mt-2 text-gray-600">X-Pointでのシステム申請。上長承認を経て、会議資料作成フェーズへ。</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg border-l-4 border-red-500 shadow-sm">
+                    <h4 class="font-bold text-gray-700">3. 決裁フェーズ</h4>
+                    <p class="text-xs text-gray-500 mt-1">第4月曜日</p>
+                    <p class="text-sm mt-2 text-gray-600">経営ミーティングでの審議・決裁。ここを過ぎると翌月扱いになります。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: RULES -->
+        <section id="rules" class="hidden space-y-6 max-w-4xl mx-auto">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">重要ルール・ナレッジ</h2>
+                <p class="text-gray-600 mt-2">
+                    全社システム費用の按分や、年次予算策定など、DX担当者が押さえておくべき特殊ルールです。
+                </p>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="flex space-x-1 border-b border-gray-300 mb-6 overflow-x-auto">
+                <button onclick="openTab('tab-budget')" class="tab-btn px-4 py-2 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-800 focus:outline-none active-tab" data-target="tab-budget">年次予算・ランニングコスト</button>
+                <button onclick="openTab('tab-allocation')" class="tab-btn px-4 py-2 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-800 focus:outline-none" data-target="tab-allocation">費用按分・科目内訳</button>
+                <button onclick="openTab('tab-assets')" class="tab-btn px-4 py-2 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-800 focus:outline-none" data-target="tab-assets">固定資産・変更処理</button>
+            </div>
+
+            <!-- Tab Content: Budget -->
+            <div id="tab-budget" class="tab-content block space-y-4 animate-fade-in">
+                <div class="card p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-3">📅 来期予算の策定（毎年10月～11月）</h3>
+                    <div class="p-4 bg-orange-50 rounded-lg border border-orange-100 mb-4">
+                        <p class="text-orange-800 font-medium">⚠️ DX担当の最重要ミッション</p>
+                        <p class="text-sm text-orange-700 mt-1">翌年度のランニングコストは、この時期に各部署でまとめ、事前に提出する必要があります。ここで申請漏れがあると、翌年の支払いが困難になります。</p>
+                    </div>
+                    <ul class="list-disc pl-5 space-y-2 text-gray-700 text-sm">
+                        <li><strong>対象経費:</strong> サーバー費用、SaaSライセンス費、保守契約費など継続的に発生するもの。</li>
+                        <li><strong>契約期間別対応:</strong>
+                            <ul class="list-circle pl-5 mt-1 text-gray-500">
+                                <li>年間契約: 契約書・年間見積書を添付</li>
+                                <li>月額固定: 1ヶ月分の見積書または実績根拠</li>
+                                <li>月額変動: 単価表や取引実績リスト等の根拠</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Tab Content: Allocation -->
+            <div id="tab-allocation" class="tab-content hidden space-y-4 animate-fade-in">
+                <div class="card p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-3">📊 全社費用の部署間按分</h3>
+                    <p class="text-gray-600 text-sm mb-4">
+                        全社で利用するシステム（グループウェア、セキュリティソフト等）は、導入主管部署（DX担当）が費用を負担するのではなく、利用部署ごとに経費を振り分ける必要があります。
+                    </p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-gray-50 p-4 rounded border">
+                            <h4 class="font-bold text-gray-700 mb-2">必須ツール: 「科目内訳」シート</h4>
+                            <p class="text-sm text-gray-600">事前に予定している費用は、必ず「科目内訳」に記載し、経理・財務部門と連携してください。</p>
+                        </div>
+                        <div class="bg-gray-50 p-4 rounded border">
+                            <h4 class="font-bold text-gray-700 mb-2">按分基準の明確化</h4>
+                            <p class="text-sm text-gray-600">ID数ベース、PC台数ベースなど、公平な基準を設けて説明できるようにしてください。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+             <!-- Tab Content: Assets & Changes -->
+             <div id="tab-assets" class="tab-content hidden space-y-4 animate-fade-in">
+                <div class="card p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-3">🔄 発注先・金額の変更</h3>
+                    <p class="text-sm text-gray-600 mb-4">承認後に条件が変わった場合、勝手に進めてはいけません。</p>
+                    
+                    <table class="w-full text-sm text-left border-collapse">
+                        <thead class="bg-gray-100 text-gray-700">
+                            <tr>
+                                <th class="p-2 border">状況</th>
+                                <th class="p-2 border">対応</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-gray-600">
+                            <tr>
+                                <td class="p-2 border">10%未満 かつ 増減10万円未満</td>
+                                <td class="p-2 border">X-Pointで金額増減分を追加入力（見積・請求書添付）</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 border">上記以外（大きな変更）</td>
+                                <td class="p-2 border font-bold text-red-600">追加稟議または修正稟議を再提出</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 border">発注先の変更</td>
+                                <td class="p-2 border">X-Point編集、コメントに経緯記載、財務へ連絡</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">🏭 固定資産（修理・入替）</h3>
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <p><span class="font-bold">修理・入替:</span> 対象の「固定資産番号」を必ず記載。廃棄予定がある場合も明記。</p>
+                        <p><span class="font-bold">新規取得:</span> 設置場所（拠点・エリア・建屋）を明確にし、レイアウト図を添付。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION: CHECKLIST -->
+        <section id="checklist" class="hidden space-y-6 max-w-4xl mx-auto pb-20">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">申請前最終チェックリスト</h2>
+                <p class="text-gray-600 mt-2">
+                    「うっかり」による差戻しを防ぐためのセルフチェックです。全てにチェックが入るまで申請しないでください。
+                </p>
+            </div>
+
+            <div class="card bg-white overflow-hidden">
+                <div class="p-6 bg-gray-800 text-white flex justify-between items-center">
+                    <h3 class="text-lg font-bold">Pre-Flight Check</h3>
+                    <span id="check-progress" class="text-sm font-mono bg-gray-700 px-2 py-1 rounded">0/6 Completed</span>
+                </div>
+                
+                <div class="p-6 space-y-4">
+                    <label class="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" class="task-check w-5 h-5 text-emerald-600 mt-1 focus:ring-emerald-500 border-gray-300 rounded" onchange="updateProgress()">
+                        <div>
+                            <span class="font-bold text-gray-800 block">スケジュール確認</span>
+                            <span class="text-sm text-gray-500">現在は第4月曜日の前ですか？中旬までにアクションを開始していますか？</span>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" class="task-check w-5 h-5 text-emerald-600 mt-1 focus:ring-emerald-500 border-gray-300 rounded" onchange="updateProgress()">
+                        <div>
+                            <span class="font-bold text-gray-800 block">稟議管理一覧へのエントリー</span>
+                            <span class="text-sm text-gray-500">「稟議管理一覧」への記載は済んでいますか？これがないと会議に上がりません。</span>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" class="task-check w-5 h-5 text-emerald-600 mt-1 focus:ring-emerald-500 border-gray-300 rounded" onchange="updateProgress()">
+                        <div>
+                            <span class="font-bold text-gray-800 block">予算の確認</span>
+                            <span class="text-sm text-gray-500">今年度の予算（または10月に申請した来期予算）に含まれていますか？</span>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" class="task-check w-5 h-5 text-emerald-600 mt-1 focus:ring-emerald-500 border-gray-300 rounded" onchange="updateProgress()">
+                        <div>
+                            <span class="font-bold text-gray-800 block">見積書の不備なし</span>
+                            <span class="text-sm text-gray-500">必須です。50万円以上の場合は相見積もり（または理由書）がありますか？</span>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" class="task-check w-5 h-5 text-emerald-600 mt-1 focus:ring-emerald-500 border-gray-300 rounded" onchange="updateProgress()">
+                        <div>
+                            <span class="font-bold text-gray-800 block">費用按分の明記</span>
+                            <span class="text-sm text-gray-500">全社システムの場合、利用部署への按分は「科目内訳」に記載しましたか？</span>
+                        </div>
+                    </label>
+
+                    <label class="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" class="task-check w-5 h-5 text-emerald-600 mt-1 focus:ring-emerald-500 border-gray-300 rounded" onchange="updateProgress()">
+                        <div>
+                            <span class="font-bold text-gray-800 block">事前相談（事後稟議の場合）</span>
+                            <span class="text-sm text-gray-500">万が一事後稟議になる場合、上長へ事前相談済ですか？（原則2営業日以内）</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div id="check-success" class="hidden bg-emerald-100 p-4 text-center text-emerald-800 font-bold">
+                    準備完了です！X-Pointで申請を進めてください。🚀
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // --- State Management ---
+        let currentSection = 'dashboard';
+        
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initDeadline();
+            initCharts();
+            setupMobileMenu();
+        });
+
+        // --- Navigation Logic ---
+        function showSection(sectionId) {
+            // Hide all sections
+            const sections = ['dashboard', 'route-checker', 'schedule', 'rules', 'checklist'];
+            sections.forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+                document.getElementById(`nav-${id}`).classList.remove('active', 'border-l-4', 'border-gray-600', 'bg-gray-100');
+            });
+
+            // Show target section
+            document.getElementById(sectionId).classList.remove('hidden');
+            document.getElementById(`nav-${sectionId}`).classList.add('active');
+
+            // Close mobile menu if open
+            const sidebar = document.getElementById('sidebar');
+            if (!sidebar.classList.contains('-translate-x-full') && window.innerWidth < 768) {
+                sidebar.classList.add('-translate-x-full');
+            }
+        }
+
+        // --- Tab Logic ---
+        function openTab(tabId) {
+            // Hide all tabs content
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            // Remove active style from buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('text-gray-800', 'border-gray-600');
+                btn.classList.add('text-gray-600', 'border-transparent');
+            });
+
+            // Show target
+            document.getElementById(tabId).classList.remove('hidden');
+            // Add active style to button
+            const btn = document.querySelector(`button[data-target="${tabId}"]`);
+            btn.classList.remove('text-gray-600', 'border-transparent');
+            btn.classList.add('text-gray-800', 'border-gray-600');
+        }
+
+        // --- Mobile Menu ---
+        function setupMobileMenu() {
+            const btn = document.getElementById('mobile-menu-btn');
+            const sidebar = document.getElementById('sidebar');
+            btn.addEventListener('click', () => {
+                sidebar.classList.toggle('-translate-x-full');
+            });
+        }
+
+        // --- Logic: Deadline Calculation (4th Monday) ---
+        function getNext4thMonday() {
+            const today = new Date();
+            let year = today.getFullYear();
+            let month = today.getMonth(); // 0-indexed
+            
+            // Function to find 4th Monday of a given year/month
+            function find4thMonday(y, m) {
+                let d = new Date(y, m, 1);
+                let mondays = 0;
+                while (d.getMonth() === m) {
+                    if (d.getDay() === 1) { // Monday
+                        mondays++;
+                        if (mondays === 4) return d;
+                    }
+                    d.setDate(d.getDate() + 1);
+                }
+                return null;
+            }
+
+            let candidate = find4thMonday(year, month);
+            
+            // If today is past this month's 4th Monday, get next month's
+            if (candidate && today > candidate) {
+                if (month === 11) { year++; month = 0; }
+                else { month++; }
+                candidate = find4thMonday(year, month);
+            }
+            
+            // If holiday check needed (generic simplified check: if candidate is holiday, next day)
+            // For simplicity in this demo, we assume the calculated date is the target.
+            return candidate;
+        }
+
+        function initDeadline() {
+            const today = new Date();
+            const deadline = getNext4thMonday();
+            
+            // Format Date
+            const formattedDate = `${deadline.getFullYear()}/${deadline.getMonth() + 1}/${deadline.getDate()}`;
+            document.getElementById('next-meeting-date').innerText = formattedDate;
+
+            // Diff Days
+            const diffTime = Math.abs(deadline - today);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            document.getElementById('sidebar-countdown').innerText = `${diffDays}日`;
+
+            // Update Action Text based on date
+            const dayOfMonth = today.getDate();
+            const actionTitle = document.getElementById('action-title');
+            const actionDesc = document.getElementById('action-desc');
+            const actionIcon = document.getElementById('action-icon');
+
+            if (dayOfMonth <= 10) {
+                actionTitle.innerText = "準備フェーズ";
+                actionDesc.innerText = "稟議管理一覧への記載と見積取得を進めてください。";
+                actionIcon.innerText = "📝";
+            } else if (dayOfMonth <= 15) {
+                actionTitle.innerText = "申請フェーズ (推奨)";
+                actionDesc.innerText = "X-Pointでの申請を行う重要な期間です。";
+                actionIcon.innerText = "🚀";
+            } else if (today < deadline) {
+                actionTitle.innerText = "決裁準備中";
+                actionDesc.innerText = "会議資料の準備期間です。承認ルートの確認を。";
+                actionIcon.innerText = "📋";
+            } else {
+                actionTitle.innerText = "決裁当日/事後";
+                actionDesc.innerText = "本日が決裁日、または今月の受付は終了しました。";
+                actionIcon.innerText = "🏁";
+            }
+
+            return { diffDays, totalDays: 30 }; // Simplified total for chart
+        }
+
+        // --- Logic: Route Checker ---
+        function calculateRoute() {
+            const amount = parseInt(document.getElementById('input-amount').value) || 0;
+            const category = document.getElementById('input-category').value;
+            
+            const resultPlaceholder = document.getElementById('result-placeholder');
+            const resultContent = document.getElementById('result-content');
+            const resDocType = document.getElementById('res-doc-type');
+            const resApprover = document.getElementById('res-approver');
+            const resRequirements = document.getElementById('res-requirements');
+            const resAlert = document.getElementById('res-alert');
+
+            if (amount === 0) {
+                resultPlaceholder.classList.remove('hidden');
+                resultContent.classList.add('hidden');
+                return;
+            }
+
+            resultPlaceholder.classList.add('hidden');
+            resultContent.classList.remove('hidden');
+            resAlert.classList.add('hidden');
+            resRequirements.innerHTML = ''; // Clear
+
+            // Base Logic
+            let docType = "";
+            let approver = "";
+            let reqs = [];
+
+            // Doc Type Logic
+            if (amount < 100000 && category !== 'consumable') {
+                docType = "調達申請書";
+            } else {
+                docType = "稟議書";
+            }
+
+            // Approver Logic (Innovation Strategy HQ Special Rule: CL is Director)
+            if (category === 'vehicle' && amount < 1000000) {
+                // Special Vehicle Rule
+                approver = "各担当本部長";
+                reqs.push("固定資産番号の記載必須");
+                reqs.push("修理・入替の場合は事前の画像添付");
+            } else {
+                // Standard Flow
+                if (amount < 200000) {
+                    approver = "取締役 (CL兼務)";
+                } else {
+                    approver = "役員決裁 (経営MTG承認)";
+                    reqs.push("経営ミーティングでの承認が必要");
+                }
+            }
+
+            // Document Requirements
+            reqs.push("見積書 (必須)");
+            if (amount >= 500000) {
+                reqs.push("相見積書 (必須) または理由書");
+                resAlert.classList.remove('hidden');
+                resAlert.innerText = "⚠️ 50万円以上のため、相見積もりの取得、または困難な理由の記載が必須です。";
+            }
+            if (category === 'vehicle') {
+                 // Added above logic already, ensuring context
+            }
+            
+            // Render
+            resDocType.innerText = docType;
+            resApprover.innerText = approver;
+            
+            reqs.forEach(req => {
+                const li = document.createElement('li');
+                li.innerText = req;
+                resRequirements.appendChild(li);
+            });
+        }
+
+        // --- Logic: Checklist ---
+        function updateProgress() {
+            const checks = document.querySelectorAll('.task-check');
+            const checked = document.querySelectorAll('.task-check:checked');
+            const countDisplay = document.getElementById('check-progress');
+            const successMsg = document.getElementById('check-success');
+
+            countDisplay.innerText = `${checked.length}/${checks.length} Completed`;
+
+            if (checked.length === checks.length) {
+                successMsg.classList.remove('hidden');
+                // Simple confetti effect logic could go here
+            } else {
+                successMsg.classList.add('hidden');
+            }
+        }
+
+        // --- Chart.js Implementations ---
+        function initCharts() {
+            // 1. Deadline Gauge
+            const ctxDeadline = document.getElementById('deadlineChart').getContext('2d');
+            const { diffDays } = initDeadline();
+            const daysPassed = 30 - diffDays; // Approx
+            
+            new Chart(ctxDeadline, {
+                type: 'doughnut',
+                data: {
+                    labels: ['経過日数', '残り日数'],
+                    datasets: [{
+                        data: [daysPassed, diffDays],
+                        backgroundColor: ['#E5E7EB', '#10B981'], // Gray, Emerald
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    }
+                },
+                plugins: [{
+                    id: 'textCenter',
+                    beforeDraw: function(chart) {
+                        var width = chart.width,
+                            height = chart.height,
+                            ctx = chart.ctx;
+            
+                        ctx.restore();
+                        var fontSize = (height / 114).toFixed(2);
+                        ctx.font = "bold " + fontSize + "em sans-serif";
+                        ctx.textBaseline = "middle";
+                        ctx.fillStyle = "#1F2937";
+            
+                        var text = diffDays + "日",
+                            textX = Math.round((width - ctx.measureText(text).width) / 2),
+                            textY = height / 2;
+            
+                        ctx.fillText(text, textX, textY);
+                        ctx.save();
+                    }
+                }]
+            });
+
+            // 2. Schedule Gantt (Horizontal Bar)
+            const ctxSchedule = document.getElementById('scheduleChart').getContext('2d');
+            
+            // Current day marker plugin
+            const todayLinePlugin = {
+                id: 'todayLine',
+                afterDatasetsDraw(chart) {
+                    const { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
+                    const today = new Date().getDate();
+                    if (today < 1 || today > 31) return;
+
+                    const xPos = x.getPixelForValue(today);
+                    
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#EF4444'; // Red line
+                    ctx.lineWidth = 2;
+                    ctx.moveTo(xPos, top);
+                    ctx.lineTo(xPos, bottom);
+                    ctx.stroke();
+                    
+                    // Label
+                    ctx.fillStyle = '#EF4444';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('今日', xPos, top - 5);
+                    ctx.restore();
+                }
+            };
+
+            new Chart(ctxSchedule, {
+                type: 'bar',
+                data: {
+                    labels: ['準備・記載', 'X-Point申請', '会議資料化', '経営MTG'],
+                    datasets: [{
+                        label: '期間',
+                        data: [
+                            [1, 15], // 1st to 15th
+                            [10, 15], // 10th to 15th
+                            [16, 24], // 16th to 24th
+                            [25, 26]  // 25th (approx)
+                        ],
+                        backgroundColor: [
+                            'rgba(156, 163, 175, 0.5)', // Gray
+                            'rgba(59, 130, 246, 0.5)',  // Blue
+                            'rgba(245, 158, 11, 0.5)',  // Amber
+                            'rgba(239, 68, 68, 0.8)'    // Red
+                        ],
+                        borderColor: [
+                            'rgb(156, 163, 175)',
+                            'rgb(59, 130, 246)',
+                            'rgb(245, 158, 11)',
+                            'rgb(239, 68, 68)'
+                        ],
+                        borderWidth: 1,
+                        barPercentage: 0.6
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', // Horizontal
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            min: 1,
+                            max: 31,
+                            title: { display: true, text: '日付 (日)' },
+                            grid: { color: '#F3F4F6' }
+                        },
+                        y: {
+                            grid: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const raw = context.raw;
+                                    return `${raw[0]}日 ～ ${raw[1]}日頃`;
+                                }
+                            }
+                        }
+                    }
+                },
+                plugins: [todayLinePlugin]
+            });
+        }
+    </script>
+</body>
+</html>
